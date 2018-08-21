@@ -172,7 +172,7 @@ def main():
             elif image and update_policy == "rename":
                 dt = time.strptime(image.created_at, "%Y-%m-%dT%H:%M:%SZ")
                 # backups named name.YYYY-MM-DD@HH:MM:SS
-                ext = dt.strftime("%Y-%m-%d@%H:%M:%S")
+                ext = time.strftime("%Y-%m-%d@%H:%M:%S", dt)
                 cloud.update_image_properties(
                     image=image,
                     name="{name}.{ext}".format(
