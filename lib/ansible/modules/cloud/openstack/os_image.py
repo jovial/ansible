@@ -121,6 +121,8 @@ from ansible.module_utils.openstack import openstack_full_argument_spec, opensta
 
 
 def does_checksum_match(module, image):
+    if not image:
+        return False
     local_sum = module.digest_from_file(module.params["filename"], "md5")
     return local_sum == image.checksum
 
