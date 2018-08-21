@@ -170,7 +170,7 @@ def main():
                     timeout=module.params['timeout']
                 )
             elif image and update_policy == "rename":
-                dt = time.strptime(image.created_at)
+                dt = time.strptime(image.created_at, "%Y-%m-%dT%H:%M:%SZ")
                 # backups named name.YYYY-MM-DD@HH:MM:SS
                 ext = dt.strftime("%Y-%m-%d@%H:%M:%S")
                 cloud.update_image_properties(
