@@ -5,6 +5,9 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+
+import time
+
 __metaclass__ = type
 
 
@@ -80,6 +83,16 @@ options:
    availability_zone:
      description:
        - Ignored. Present for backwards compatibility
+   update_policy:
+     description:
+        - What to do if an image with that name already exists.
+        - If C(keep_existing), the original file will be kept. Set I(checksum)
+          if you want the file to uploaded with the same name. Default is
+          C(keep_existing).
+        - If C(delete), the existing image will be removed prior to uploading
+          the new one.
+        - If C(rename), the existing image will be renamed with the extension
+          name.YYYY-MM-DD@HH:MM:SS formatted with the creation timestamp.
 requirements: ["openstacksdk"]
 '''
 
@@ -107,6 +120,10 @@ from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.openstack import openstack_full_argument_spec, openstack_module_kwargs, openstack_cloud_from_module
 
 
+def does_checksum_match(module, image):
+    local_sum = module.digest_from_file(module.params["filename"], "md5")
+    return local_sum == image.checksum
+
 def main():
 
     argument_spec = openstack_full_argument_spec(
@@ -124,39 +141,61 @@ def main():
         kernel=dict(default=None),
         properties=dict(type='dict', default={}),
         state=dict(default='present', choices=['absent', 'present']),
+        update_policy=dict(default='keep_existing',
+                           choices=['keep_existing', 'delete', 'rename']),
     )
     module_kwargs = openstack_module_kwargs()
     module = AnsibleModule(argument_spec, **module_kwargs)
 
     sdk, cloud = openstack_cloud_from_module(module)
-    try:
 
-        changed = False
+    try:
         if module.params['checksum']:
             image = cloud.get_image(name_or_id=None, filters={'checksum': module.params['checksum']})
         else:
             image = cloud.get_image(name_or_id=module.params['name'])
 
+        update_policy = module.params['update_policy']
+        checksum_matches = does_checksum_match(module, image)
+
         if module.params['state'] == 'present':
-            if not image:
-                kwargs = {}
-                if module.params['id'] is not None:
-                    kwargs['id'] = module.params['id']
-                image = cloud.create_image(
-                    name=module.params['name'],
-                    filename=module.params['filename'],
-                    disk_format=module.params['disk_format'],
-                    container_format=module.params['container_format'],
-                    wait=module.params['wait'],
-                    timeout=module.params['timeout'],
-                    is_public=module.params['is_public'],
-                    min_disk=module.params['min_disk'],
-                    min_ram=module.params['min_ram'],
-                    **kwargs
+            if (image and update_policy == "keep_existing") or checksum_matches:
+                module.exit_json(changed=False)
+            elif image and update_policy == "delete":
+                cloud.delete_image(
+                    name_or_id=module.params['name'],
+                    wait=True,
+                    timeout=module.params['timeout']
                 )
-                changed = True
-                if not module.params['wait']:
-                    module.exit_json(changed=changed, image=image, id=image.id)
+            elif image and update_policy == "rename":
+                # backups named name.YYYY-MM-DD@HH:MM:SS
+                ext = time.strftime("%Y-%m-%d@%H:%M:%S",
+                                    image.created_at)
+                cloud.update_image_properties(
+                    image=image,
+                    name="{name}.{ext}".format(
+                        name=image.name,
+                        ext=ext
+                    )
+                )
+            kwargs = {}
+            if module.params['id'] is not None:
+                kwargs['id'] = module.params['id']
+            image = cloud.create_image(
+                name=module.params['name'],
+                filename=module.params['filename'],
+                disk_format=module.params['disk_format'],
+                container_format=module.params['container_format'],
+                wait=module.params['wait'],
+                timeout=module.params['timeout'],
+                is_public=module.params['is_public'],
+                min_disk=module.params['min_disk'],
+                min_ram=module.params['min_ram'],
+                **kwargs
+            )
+            changed = True
+            if not module.params['wait']:
+                module.exit_json(changed=changed, image=image, id=image.id)
 
             cloud.update_image_properties(
                 image=image,
